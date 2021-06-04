@@ -17,7 +17,6 @@ package confgenerator
 
 import (
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -234,18 +233,26 @@ func generateOtelServices(receiverNameMap map[string]string, exporterNameMap map
 	return serviceList, nil
 }
 
+func filepathJoin(hostInfo *host.InfoStat, elem ...string) string {
+	separator := "/"
+	if hostInfo.OS == "windows" {
+		separator = `\`
+	}
+	return strings.Join(elem, separator)
+}
+
 // defaultTails returns the default Tail sections for the agents' own logs.
 func defaultTails(logsDir string, stateDir string, hostInfo *host.InfoStat) (tails []*conf.Tail) {
 	tails = []*conf.Tail{}
 	tailFluentbit := conf.Tail{
 		Tag:  "ops-agent-fluent-bit",
-		DB:   filepath.Join(stateDir, "buffers", "ops-agent-fluent-bit"),
-		Path: filepath.Join(logsDir, "logging-module.log"),
+		DB:   filepathJoin(hostInfo, stateDir, "buffers", "ops-agent-fluent-bit"),
+		Path: filepathJoin(hostInfo, logsDir, "logging-module.log"),
 	}
 	tailCollectd := conf.Tail{
 		Tag:  "ops-agent-collectd",
-		DB:   filepath.Join(stateDir, "buffers", "ops-agent-collectd"),
-		Path: filepath.Join(logsDir, "metrics-module.log"),
+		DB:   filepathJoin(hostInfo, stateDir, "buffers", "ops-agent-collectd"),
+		Path: filepathJoin(hostInfo, logsDir, "metrics-module.log"),
 	}
 	tails = append(tails, &tailFluentbit)
 	if hostInfo.OS != "windows" {
@@ -302,7 +309,7 @@ func generateFluentBitConfigs(logging *logging, logsDir string, stateDir string,
 			return "", "", err
 		}
 		extractedTails := []*conf.Tail{}
-		extractedTails, fbSyslogs, fbWinEventlogs, err = generateFluentBitInputs(fileReceiverFactories, syslogReceiverFactories, wineventlogReceiverFactories, logging.Service.Pipelines, stateDir)
+		extractedTails, fbSyslogs, fbWinEventlogs, err = generateFluentBitInputs(fileReceiverFactories, syslogReceiverFactories, wineventlogReceiverFactories, logging.Service.Pipelines, stateDir, hostInfo)
 		if err != nil {
 			return "", "", err
 		}
@@ -599,7 +606,7 @@ func generateOtelExporters(exporters map[string]collectd.Exporter, pipelines map
 	return stackdriverList, exportNameMap, nil
 }
 
-func generateFluentBitInputs(fileReceiverFactories map[string]*fileReceiverFactory, syslogReceiverFactories map[string]*syslogReceiverFactory, wineventlogReceiverFactories map[string]*wineventlogReceiverFactory, pipelines map[string]*loggingPipeline, stateDir string) ([]*conf.Tail, []*conf.Syslog, []*conf.WindowsEventlog, error) {
+func generateFluentBitInputs(fileReceiverFactories map[string]*fileReceiverFactory, syslogReceiverFactories map[string]*syslogReceiverFactory, wineventlogReceiverFactories map[string]*wineventlogReceiverFactory, pipelines map[string]*loggingPipeline, stateDir string, hostInfo *host.InfoStat) ([]*conf.Tail, []*conf.Syslog, []*conf.WindowsEventlog, error) {
 	fbTails := []*conf.Tail{}
 	fbSyslogs := []*conf.Syslog{}
 	fbWinEventlogs := []*conf.WindowsEventlog{}
@@ -614,7 +621,7 @@ func generateFluentBitInputs(fileReceiverFactories map[string]*fileReceiverFacto
 			if f, ok := fileReceiverFactories[rID]; ok {
 				fbTail := conf.Tail{
 					Tag:  fmt.Sprintf("%s.%s", pID, rID),
-					DB:   filepath.Join(stateDir, "buffers", pID+"_"+rID),
+					DB:   filepathJoin(hostInfo, stateDir, "buffers", pID+"_"+rID),
 					Path: strings.Join(f.IncludePaths, ","),
 				}
 				if len(f.ExcludePaths) != 0 {
@@ -638,7 +645,7 @@ func generateFluentBitInputs(fileReceiverFactories map[string]*fileReceiverFacto
 					Tag:          fmt.Sprintf("%s.%s", pID, rID),
 					Channels:     strings.Join(f.Channels, ","),
 					Interval_Sec: "1",
-					DB:           filepath.Join(stateDir, "buffers", pID+"_"+rID),
+					DB:           filepathJoin(hostInfo, stateDir, "buffers", pID+"_"+rID),
 				}
 				fbWinEventlogs = append(fbWinEventlogs, &fbWinlog)
 				continue

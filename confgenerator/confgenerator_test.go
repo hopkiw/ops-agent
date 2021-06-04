@@ -28,10 +28,6 @@ import (
 const (
 	validTestdataDir       = "testdata/valid"
 	invalidTestdataDir     = "testdata/invalid"
-	defaultLogsDir         = "/var/log/google-cloud-ops-agent/subagents"
-	defaultStateDir        = "/var/lib/google-cloud-ops-agent/fluent-bit"
-	windowsDefaultLogsDir  = "C:\\ProgramData\\Google\\Cloud Operations\\Ops Agent\\log"
-	windowsDefaultStateDir = "C:\\ProgramData\\Google\\Cloud Operations\\Ops Agent\\run"
 )
 
 var (
@@ -46,34 +42,49 @@ var (
 	goldenOtelPath     = validTestdataDir + "/%s/%s/golden_otel.conf"
 	goldenErrorPath    = invalidTestdataDir + "/%s/%s/golden_error"
 	invalidInputPath   = invalidTestdataDir + "/%s/%s/input.yaml"
+
+	allPlatforms = map[string]struct{
+		HostInfo *host.InfoStat
+		DefaultLogsDir string
+		DefaultStateDir string
+	}{
+		"linux": {
+			HostInfo: &host.InfoStat{
+				OS: "linux",
+				// In order to make test data static, we put static value for platform-wise fields.
+				Platform: "linux_platform",
+				PlatformVersion: "linux_platform_version",
+			},
+			DefaultLogsDir:  "/var/log/google-cloud-ops-agent/subagents",
+			DefaultStateDir: "/var/lib/google-cloud-ops-agent/fluent-bit",
+		},
+		"windows": {
+			HostInfo: &host.InfoStat{
+				OS: "windows",
+				// In order to make test data static, we put static value for platform-wise fields.
+				Platform: "win_platform",
+				PlatformVersion: "win_platform_version",
+			},
+			DefaultLogsDir: `C:\ProgramData\Google\Cloud Operations\Ops Agent\log`,
+			DefaultStateDir: `C:\ProgramData\Google\Cloud Operations\Ops Agent\run`,
+		},
+	}
 )
 
-var platform string
-var hostInfo *host.InfoStat
-
-func init() {
-	hostInfo, _ = host.Info()
-	if hostInfo.OS == "windows" {
-		platform = "windows"
-		//In order to make test data static, we put static value for platform-wise fields.
-		hostInfo.Platform = "win_platform"
-		hostInfo.PlatformVersion = "win_platform_version"
-	} else {
-		platform = "linux"
-		//In order to make test data static, we put static value for platform-wise fields.
-		hostInfo.Platform = "linux_platform"
-		hostInfo.PlatformVersion = "linux_platform_version"
+func TestGenerateConfsWithValidInput(t *testing.T) {
+	for platform, platformInfo := range allPlatforms {
+		platform := platform
+		logsDir := platformInfo.DefaultLogsDir
+		stateDir := platformInfo.DefaultStateDir
+		hostInfo := platformInfo.HostInfo
+		t.Run(platform, func(t *testing.T) {
+			testGenerateConfsWithValidInput(t, platform, logsDir, stateDir, hostInfo)
+		})
 	}
 }
 
-func TestGenerateConfsWithValidInput(t *testing.T) {
+func testGenerateConfsWithValidInput(t *testing.T, platform string, logsDir string, stateDir string, hostInfo *host.InfoStat) {
 	dirPath := validTestdataDir + "/" + platform
-	logsDir := defaultLogsDir
-	stateDir := defaultStateDir
-	if platform == "windows" {
-		logsDir = windowsDefaultLogsDir
-		stateDir = windowsDefaultStateDir
-	}
 	dirs, err := ioutil.ReadDir(dirPath)
 	if err != nil {
 		t.Fatal(err)
@@ -103,39 +114,39 @@ func TestGenerateConfsWithValidInput(t *testing.T) {
 			}
 
 			// Retrieve the expected golden conf files.
-			expectedMainConfig := readFileContent(testName, goldenMainPath, t, true)
-			expectedParserConfig := readFileContent(testName, goldenParserPath, t, true)
+			expectedMainConfig := readFileContent(t, testName, goldenMainPath, platform, true)
+			expectedParserConfig := readFileContent(t, testName, goldenParserPath, platform, true)
 			// Generate the actual conf files.
 			mainConf, parserConf, err := uc.GenerateFluentBitConfigs(logsDir, stateDir, hostInfo)
 			if err != nil {
 				t.Fatalf("GenerateFluentBitConfigs got %v", err)
 			}
 			// Compare the expected and actual and error out in case of diff.
-			updateOrCompareGolden(t, testName, expectedMainConfig, mainConf, goldenMainPath)
-			updateOrCompareGolden(t, testName, expectedParserConfig, parserConf, goldenParserPath)
+			updateOrCompareGolden(t, testName, expectedMainConfig, mainConf, goldenMainPath, platform)
+			updateOrCompareGolden(t, testName, expectedParserConfig, parserConf, goldenParserPath, platform)
 
 			if platform == "windows" {
-				expectedOtelConfig := readFileContent(testName, goldenOtelPath, t, true)
+				expectedOtelConfig := readFileContent(t, testName, goldenOtelPath, platform, true)
 				otelConf, err := uc.GenerateOtelConfig(hostInfo)
 				if err != nil {
 					t.Fatalf("GenerateOtelConfig got %v", err)
 				}
 				// Compare the expected and actual and error out in case of diff.
-				updateOrCompareGolden(t, testName, expectedOtelConfig, otelConf, goldenOtelPath)
+				updateOrCompareGolden(t, testName, expectedOtelConfig, otelConf, goldenOtelPath, platform)
 			} else {
-				expectedCollectdConfig := readFileContent(testName, goldenCollectdPath, t, true)
-				collectdConf, err := uc.GenerateCollectdConfig(defaultLogsDir)
+				expectedCollectdConfig := readFileContent(t, testName, goldenCollectdPath, platform, true)
+				collectdConf, err := uc.GenerateCollectdConfig(logsDir)
 				if err != nil {
 					t.Fatalf("GenerateCollectdConfig got %v", err)
 				}
 				// Compare the expected and actual and error out in case of diff.
-				updateOrCompareGolden(t, testName, expectedCollectdConfig, collectdConf, goldenCollectdPath)
+				updateOrCompareGolden(t, testName, expectedCollectdConfig, collectdConf, goldenCollectdPath, platform)
 			}
 		})
 	}
 }
 
-func readFileContent(testName string, filePathFormat string, t *testing.T, respectGolden bool) []byte {
+func readFileContent(t *testing.T, testName string, filePathFormat string, platform string, respectGolden bool) []byte {
 	filePath := fmt.Sprintf(filePathFormat, platform, testName)
 	rawExpectedConfig, err := ioutil.ReadFile(filePath)
 	if err != nil {
@@ -149,7 +160,7 @@ func readFileContent(testName string, filePathFormat string, t *testing.T, respe
 	return rawExpectedConfig
 }
 
-func updateOrCompareGolden(t *testing.T, testName string, expectedBytes []byte, actual string, path string) {
+func updateOrCompareGolden(t *testing.T, testName string, expectedBytes []byte, actual string, path string, platform string) {
 	t.Helper()
 	expected := strings.ReplaceAll(string(expectedBytes), "\r\n", "\n")
 	actual = strings.ReplaceAll(actual, "\r\n", "\n")
@@ -168,6 +179,18 @@ func updateOrCompareGolden(t *testing.T, testName string, expectedBytes []byte, 
 }
 
 func TestGenerateConfigsWithInvalidInput(t *testing.T) {
+	for platform, platformInfo := range allPlatforms {
+		platform := platform
+		logsDir := platformInfo.DefaultLogsDir
+		stateDir := platformInfo.DefaultStateDir
+		hostInfo := platformInfo.HostInfo
+		t.Run(platform, func(t *testing.T) {
+			testGenerateConfigsWithInvalidInput(t, platform, logsDir, stateDir, hostInfo)
+		})
+	}
+}
+
+func testGenerateConfigsWithInvalidInput(t *testing.T, platform string, logsDir string, stateDir string, hostInfo *host.InfoStat) {
 	dirPath := invalidTestdataDir + "/" + platform
 	dirs, err := ioutil.ReadDir(dirPath)
 	if err != nil {
@@ -176,25 +199,25 @@ func TestGenerateConfigsWithInvalidInput(t *testing.T) {
 	for _, d := range dirs {
 		testName := d.Name()
 		t.Run(testName, func(t *testing.T) {
-			invalidInput := readFileContent(testName, invalidInputPath, t, false)
-			expectedError := readFileContent(testName, goldenErrorPath, t, true)
+			invalidInput := readFileContent(t, testName, invalidInputPath, platform, false)
+			expectedError := readFileContent(t, testName, goldenErrorPath, platform, true)
 			// The expected error could be triggered by:
 			// 1. Parsing phase of the agent config when the config is not YAML.
 			// 2. Config generation phase when the config is invalid.
 			uc, actualError := ParseUnifiedConfig(invalidInput)
 			if actualError == nil {
-				actualError = generateConfigs(uc, defaultLogsDir, defaultStateDir)
+				actualError = generateConfigs(uc, platform, logsDir, stateDir, hostInfo)
 			}
 			if actualError == nil {
 				t.Errorf("test %q: generateConfigs succeeded, want error:\n%s\ninvalid input:\n%s", testName, expectedError, invalidInput)
 			} else {
-				updateOrCompareGolden(t, testName, expectedError, actualError.Error(), goldenErrorPath)
+				updateOrCompareGolden(t, testName, expectedError, actualError.Error(), goldenErrorPath, platform)
 			}
 		})
 	}
 }
 
-func generateConfigs(uc UnifiedConfig, defaultLogsDir string, defaultStateDir string) (err error) {
+func generateConfigs(uc UnifiedConfig, platform string, defaultLogsDir string, defaultStateDir string, hostInfo *host.InfoStat) (err error) {
 	if _, _, err := uc.GenerateFluentBitConfigs(defaultLogsDir, defaultStateDir, hostInfo); err != nil {
 		return err
 	}
