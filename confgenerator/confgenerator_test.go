@@ -88,8 +88,9 @@ func TestGenerateConfsWithValidInput(t *testing.T) {
 			// testdata directory.
 			if d.Name() == "default_config" {
 				unifiedConfigFilePath = "default-config.yaml"
-			} else if d.Name() == "windows_default_config" {
-				unifiedConfigFilePath = "windows-default-config.yaml"
+				if platform == "windows" {
+					unifiedConfigFilePath = "windows-default-config.yaml"
+				}
 			}
 
 			data, err := ioutil.ReadFile(unifiedConfigFilePath)
